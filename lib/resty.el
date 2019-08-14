@@ -1,3 +1,4 @@
+;; -*- lexical-binding: t -*-
 (require 'request)
 (require 's)
 
@@ -31,25 +32,45 @@
   :group 'resty)
 
 (defun resty--url-params (alist)
-  (string-join
-   (mapcar (lambda (pair) (concat (car pair) "=" (cdr pair))) alist)
-   "&"))
+  (if (consp alist)
+      (concat "?" (string-join
+                   (mapcar (lambda (pair) (concat (car pair) "=" (cdr pair))) alist)
+                   "&"))
+    ""))
 
 (defun resty--make-request--new (method path body &rest rest)
   (setq user-headers (or (plist-get rest :headers) '())
         base-url (or (plist-get rest :base-url) (resty--base-url))
+        output (or (plist-get rest :output) t)
         params (resty--url-params (or (plist-get rest :params) '())))
   (let ((headers (append user-headers resty-default-headers))
-        (url (concat base-url path (if params (concat "?" params) ""))))
-    (resty--http-do method url '() headers (json-encode-plist body))))
+        (url (concat base-url path params)))
+    (resty--http-do method url '() headers (json-encode-plist body) output)))
 
-(cl-defun resty--response-handler (&key data response &allow-other-keys)
-  (with-current-buffer
-      (get-buffer-create resty-buffer-response-name)
+(defun resty--http-do (method url params headers entity output)
+  (if resty-log-request
+      (message "HTTP %s %s Headers:[%s] Body:[%s]" method url headers entity))
+  (let ((success-handler
+         (if (eq output t)
+             #'resty--success-response-handler
+           (resty--make-succ-callback-handler output))))
+    (request url
+             :params params
+             :headers headers
+             :type method
+             :data entity
+             :parser 'buffer-string
+             ;; :sync t
+             :success success-handler
+             :error #'resty--error-response-handler)))
+
+(cl-defun resty--success-response-handler (&key data response &allow-other-keys)
+  (with-current-buffer (get-buffer-create resty-buffer-response-name)
     (erase-buffer)
-    (insert data)
     (js-mode)
-    (json-pretty-print-buffer)
+    (when (json-response? response)
+      (insert data)
+      (json-pretty-print-buffer))
     (goto-char (point-max))
     (resty--print-headers response)
     (goto-char (point-min))
@@ -58,16 +79,32 @@
     (message "")
     (switch-to-buffer-other-window (current-buffer))))
 
-(defun resty--http-do (method url params headers entity)
-  (if resty-log-request
-      (message "HTTP %s %s Headers:[%s] Body:[%s]" method url headers entity))
-  (request url
-           :params params
-           :headers headers
-           :type method
-           :data (json-encode-plist body)
-           :parser 'buffer-string
-           :success #'resty--response-handler))
+(cl-defun resty--error-response-handler (&key data response &allow-other-keys)
+  (with-current-buffer (get-buffer-create resty-buffer-response-name)
+    (erase-buffer)
+    (js-mode)
+    (when (json-response? response)
+      (insert data)
+      (json-pretty-print-buffer))
+    (goto-char (point-max))
+    (resty--print-headers response)
+    (goto-char (point-min))
+    (buffer-enable-undo)
+    (resty-response-mode)
+    (message "")
+    (switch-to-buffer-other-window (current-buffer))))
+
+(defun json-response? (response)
+  (let ((content-type (request-response-header response "Content-Type")))
+    (string-prefix-p "application/json" content-type)))
+
+(defun resty--make-succ-callback-handler (func)
+  (setq-local resty--callback func) ;; FIXME: dirty fix, since closure is not working
+  (cl-function
+   (lambda (&key data response &allow-other-keys)
+     (if (json-response? response)
+         (funcall resty--func--local (json-read-from-string data) response)
+       (signal "Not json" response)))))
 
 (defun resty--print (response key)
   (let ((value (plist-get (request-response-settings response) key)))
@@ -78,6 +115,8 @@
     (insert "\n\n")
     (resty--print response :url)
     (resty--print response :headers)
+    (when (request-response-error-thrown response)
+      (insert (format "%s\n" (request-response-error-thrown response))))
     (insert "\n")
     (insert (request-response--raw-header response))
     (comment-region hstart (point))))
