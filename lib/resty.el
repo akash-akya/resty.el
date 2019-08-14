@@ -30,13 +30,18 @@
                      (quit-window (get-buffer-window (current-buffer))))))
   :group 'resty)
 
+(defun resty--url-params (alist)
+  (string-join
+   (mapcar (lambda (pair) (concat (car pair) "=" (cdr pair))) alist)
+   "&"))
+
 (defun resty--make-request--new (method path body &rest rest)
   (setq user-headers (or (plist-get rest :headers) '())
         base-url (or (plist-get rest :base-url) (resty--base-url))
-        params (or (plist-get rest :params) '()))
+        params (resty--url-params (or (plist-get rest :params) '())))
   (let ((headers (append user-headers resty-default-headers))
-        (url (concat base-url path)))
-    (resty--http-do method url params headers (json-encode-plist body))))
+        (url (concat base-url path (if params (concat "?" params) ""))))
+    (resty--http-do method url '() headers (json-encode-plist body))))
 
 (cl-defun resty--response-handler (&key data response &allow-other-keys)
   (with-current-buffer
