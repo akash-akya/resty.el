@@ -60,9 +60,11 @@
              :type method
              :data entity
              :parser 'buffer-string
-             ;; :sync t
+             :sync t
+             :timeout 7
              :success success-handler
-             :error #'resty--error-response-handler)))
+             :error #'resty--error-response-handler)
+    (message "Done")))
 
 (cl-defun resty--success-response-handler (&key data response &allow-other-keys)
   (with-current-buffer (get-buffer-create resty-buffer-response-name)
