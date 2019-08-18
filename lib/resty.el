@@ -1,6 +1,5 @@
 ;; -*- lexical-binding: t -*-
 (require 'request)
-(require 's)
 
 (defgroup resty nil
   "An interactive HTTP client for Emacs."
@@ -105,7 +104,7 @@
   (cl-function
    (lambda (&key data response &allow-other-keys)
      (if (json-response? response)
-         (funcall resty--func--local (json-read-from-string data) response)
+         (funcall resty--callback (json-read-from-string data) response)
        (signal "Not json" response)))))
 
 (defun resty--print (response key)
