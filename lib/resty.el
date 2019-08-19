@@ -44,7 +44,8 @@
 
 (defun resty--make-request (method path body &rest rest)
   (setq user-headers (or (plist-get rest :headers) '())
-        base-url (or (plist-get rest :base-url) (resty--base-url))
+        base-url (or (plist-get rest :base-url)
+                     (resty--base-url (plist-get rest :env)))
         success-handler (resty--create-success-handler (or (plist-get rest :output) t))
         params (resty--url-params (or (plist-get rest :params) '()))
         timeout (or (plist-get rest :timeout) resty-default-timeout))
@@ -196,9 +197,14 @@
 
 ;; (defun resty--use-env (env) (setq-local use-env env))
 
-(defun resty--base-url ()
-  (or (resty--get-env (buffer-name) resty--current-env)
-      (resty--get-env (buffer-name) 'global)))
+(defun resty--base-url (env)
+  (if env
+      (resty--get-env (buffer-name) env)
+    (or (resty--get-env (buffer-name) resty--current-env)
+        (resty--get-env (buffer-name) 'global))))
 
 ;; Enable hideshow minor mode
 (hs-minor-mode)
+
+(provide 'resty)
+;;; resty.el ends here
