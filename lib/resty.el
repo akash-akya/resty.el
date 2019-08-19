@@ -98,6 +98,8 @@
     (when (json-response? response)
       (insert data)
       (json-pretty-print-buffer))
+    (when (csv-response? response)
+      (insert data))
     (goto-char (point-max))
     (resty--print-headers response)
     (goto-char (point-min))
@@ -126,6 +128,9 @@
   (let ((content-type (request-response-header response "Content-Type")))
     (string-prefix-p "application/json" content-type)))
 
+(defun csv-response? (response)
+  (let ((content-type (request-response-header response "Content-Type")))
+    (string-prefix-p "text/csv" content-type)))
 
 (defun resty--cleanup ()
   (setq resty--request-state nil) ;; FIXME: dont use global variable
