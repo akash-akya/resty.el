@@ -22,7 +22,8 @@
   :type 'string)
 
 (defcustom resty-default-headers '(("Content-Type" . "application/json")
-                                   ("Accept" . "application/json"))
+                                   ("Accept" . "application/json")
+                                   ("cache-control" . "no-cache"))
   "Default headers"
   :group 'resty
   :type 'string)
