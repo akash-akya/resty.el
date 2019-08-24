@@ -70,7 +70,18 @@ current approach is based on the ~id~ aka output buffer name
 Example use case, tableau signin -> get-view/workbook id -> get data -> signout
 
 ** DONE show correct time taken for the request
-currently we sample time at the ~complete~ which is wrong as complete callback is called after success/failure
+currently we sample time at the ~complete~ which is wrong as complete
+callback is called after success/failure
+
+** DONE display request method in the display
+
+** DONE format request headers
+
+** TODO show header as popup on a key-press
+
+** TODO fix pipelines loosing base URL
+currently consequent pipelines fail to get the baseurl when the buffer
+switch happens before that request starts
 
 ** TODO import cURL request
 
