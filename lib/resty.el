@@ -1,5 +1,6 @@
 ;; -*- lexical-binding: t -*-
 (require 'request)
+(load "./request-helper")
 
 (defgroup resty nil
   "An interactive HTTP client for Emacs."
@@ -15,7 +16,7 @@
   :group 'resty
   :type 'integer)
 
-(defcustom resty-buffer-response-name "*HTTP Response*"
+(defcustom resty-buffer-response-name "Response"
   "Name for response buffer."
   :group 'resty
   :type 'string)
@@ -37,93 +38,53 @@
 
 (defun resty--url-params (alist)
   (if (consp alist)
-      (concat "?" (string-join
-                   (mapcar (lambda (pair) (concat (car pair) "=" (cdr pair))) alist)
-                   "&"))
+      (concat "?"
+              (string-join
+               (mapcar (lambda (pair) (concat (car pair) "=" (cdr pair))) alist)
+        "&"))
     ""))
 
 (defun resty--make-request (method path body &rest rest)
   (setq user-headers (or (plist-get rest :headers) '())
         base-url (or (plist-get rest :base-url)
                      (resty--base-url (plist-get rest :env)))
-        success-handler (resty--create-success-handler (or (plist-get rest :output) t))
+        success-callbacks (or (plist-get rest :callbacks) '())
         params (resty--url-params (or (plist-get rest :params) '()))
+        id (or (plist-get rest :id) resty-buffer-response-name)
         timeout (or (plist-get rest :timeout) resty-default-timeout))
   (let ((headers (append user-headers resty-default-headers))
         (url (concat base-url path params)))
     (resty--http-do
-     method
-     url
-     headers
-     (json-encode-plist body)
+     (list :id id :method method :url url :headers headers :entity (json-encode-plist body))
      timeout
-     success-handler)))
+     (cons #'resty--response-handler success-callbacks)
+     (list #'resty--response-handler))))
 
-(defun resty--create-success-handler (handler)
-  (if (eq handler t)
-      #'resty--success-response-handler
-    (resty--make-succ-callback-handler handler)))
+(defun resty--response-handler (data response request duration)
+  ;; handle different mime and headers
+  (resty--default-response-handler data response request duration))
 
-(defvar resty--request-state nil)
-(defvar resty--request-time-start nil)
-
-(defun resty--http-do (method url headers entity timeout success-handler)
-  (if resty-log-request
-      (message "HTTP %s %s Headers: %s Body: %s" method url headers entity))
-  (if resty--request-state
-      (message "[resty] A request is already in process... skipping")
-    (setq resty--request-state 'attempt)
-    (setq resty--request-time-start (current-time))
-    (unwind-protect
-        (progn
-          (request url
-                   :headers headers
-                   :type method
-                   :data entity
-                   :parser 'buffer-string
-                   ;; :sync t
-                   :timeout timeout
-                   :success success-handler
-                   :error #'resty--error-response-handler)
-          (setq resty--request-state 'started)
-          (message "[resty] Request started"))
-      (when (eq resty--request-state 'attempt) ;; if (request ...) itself fail
-        (setq resty--request-state nil)
-        (message "[resty] Request failed due to an error")))))
-
-(cl-defun resty--success-response-handler (&key data response &allow-other-keys)
-  (resty--cleanup)
-  (with-current-buffer (get-buffer-create resty-buffer-response-name)
+(defun resty--default-response-handler (_data response request duration)
+  (with-current-buffer (resty--create-buffer (plist-get request :id))
     (erase-buffer)
     (js-mode)
+    (hs-minor-mode)
     (when (json-response? response)
-      (insert data)
+      (insert (request-response-data response))
       (json-pretty-print-buffer))
     (when (csv-response? response)
-      (insert data))
+      (insert (request-response-data response)))
     (goto-char (point-max))
-    (resty--print-headers response)
+    (resty--print-headers response duration)
     (goto-char (point-min))
     (buffer-enable-undo)
     (resty-response-mode)
     (message "")
-    (switch-to-buffer-other-window (current-buffer))))
+    (switch-to-buffer-other-window (current-buffer))
+    (other-window -1)))
 
-(cl-defun resty--error-response-handler (&key data response &allow-other-keys)
-  (resty--cleanup)
-  (with-current-buffer (get-buffer-create resty-buffer-response-name)
-    (erase-buffer)
-    (js-mode)
-    (when (json-response? response)
-      (insert data)
-      (json-pretty-print-buffer))
-    (goto-char (point-max))
-    (resty--print-headers response)
-    (goto-char (point-min))
-    (buffer-enable-undo)
-    (resty-response-mode)
-    (message "")
-    (switch-to-buffer-other-window (current-buffer))))
+(defun resty--create-buffer (id)
+  (get-buffer-create (format "*RESTY-%s*" id)))
 
 (defun json-response? (response)
   (let ((content-type (request-response-header response "Content-Type")))
@@ -133,25 +94,11 @@
   (let ((content-type (request-response-header response "Content-Type")))
     (string-prefix-p "text/csv" content-type)))
 
-(defun resty--cleanup ()
-  (setq resty--request-state nil) ;; FIXME: dont use global variable
-  (message "[resty] Request Completed"))
-
-(defun resty--make-succ-callback-handler (func)
-  (setq-local resty--callback func) ;; FIXME: dirty fix, since closure is not working
-  (cl-function
-   (lambda (&key data response &allow-other-keys)
-     (resty--cleanup)
-     (if (json-response? response)
-         (funcall resty--callback (json-read-from-string data) response)
-       (signal "Not json" response)))))
-
-
-(defun resty--print-headers (response)
+(defun resty--print-headers (response duration)
   (let ((hstart (point))
         (url (plist-get (request-response-settings response) :url))
         (request-headers (plist-get (request-response-settings response) :headers))
-        (time (float-time (time-subtract (current-time) resty--request-time-start))))
+        (time (float-time duration)))
     (insert
      (string-join
       (mapcar (lambda (s) (format "%s" s))
@@ -160,8 +107,7 @@
                     request-headers
                     (format "Request duration: %fs" time)
                     (or (request-response-error-thrown response) "")
-                    (request-response--raw-header response)
-                    ))
+                    (request-response--raw-header response)))
       "\n"))
     (comment-region hstart (point))))
 
