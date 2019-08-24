@@ -98,19 +98,26 @@
 (defun resty--print-headers (response duration)
   (let ((hstart (point))
         (url (plist-get (request-response-settings response) :url))
+        (method (plist-get (request-response-settings response) :type))
         (request-headers (plist-get (request-response-settings response) :headers))
         (time (float-time duration)))
     (insert
      (string-join
       (mapcar (lambda (s) (format "%s" s))
               (list "\n"
-                    url
-                    request-headers
-                    (format "Request duration: %fs" time)
+                    (concat method " " url)
+                    (resty--format-request-headers request-headers)
+                    (format "\nRequest duration = %fs" time)
                     (or (request-response-error-thrown response) "")
                     (request-response--raw-header response)))
       "\n"))
     (comment-region hstart (point))))
+
+(defun resty--format-request-headers (headers)
+  (string-join
+   (mapcar (lambda (elem) (format "%s: %s" (car elem) (cdr elem)))
+           headers)
+   "\n"))
 
 (defun POST (path body &rest rest)
   (apply #'resty--make-request (append (list "POST" path body) rest)))
