@@ -34,7 +34,10 @@
   :lighter nil
   :keymap '(("q" . (lambda ()
                      (interactive)
-                     (quit-window (get-buffer-window (current-buffer))))))
+                     (quit-window (get-buffer-window (current-buffer)))))
+            ("h" . (lambda ()
+                     (interactive)
+                     (resty--show-headers-window))))
   :group 'resty)
 
 (defun resty--url-params (alist)
@@ -73,6 +76,7 @@
       (erase-buffer)
       (funcall (resty--get-response-handler (resty--response-content-type response))
                data response request duration)
+      (setq-local resty-formated-headers (resty--formatted-headers response duration))
       (resty--set-header-line status-code method url)
       (switch-to-buffer-other-window (current-buffer))
       (other-window -1))))
@@ -94,7 +98,6 @@
 
 (defun resty--response-content-type (response)
   (let ((content-type (request-response-header response "Content-Type")))
-    (message " --- content-type: %s" content-type)
     (and content-type (car (split-string content-type ";")))))
 
 (defun resty--create-buffer (id)
@@ -117,11 +120,11 @@
   (when (csv-response? response)
     (insert (request-response-data response)))
   (goto-char (point-max))
-  (resty--print-headers response duration)
+  ;; (resty--print-headers response duration)
   (goto-char (point-min))
   (buffer-enable-undo)
   (resty-response-mode)
-  (message "[RESTY] DONE: %s" duration))
+  (message "[RESTY] DONE: %fs" (float-time duration)))
 
 (defun json-response? (response)
   (let ((content-type (request-response-header response "Content-Type")))
@@ -130,6 +133,23 @@
 (defun csv-response? (response)
   (let ((content-type (request-response-header response "Content-Type")))
     (string-prefix-p "text/csv" content-type)))
+
+(defun resty--show-headers-window ()
+  (let ((help-window-select t))
+    (with-help-window (concat (buffer-name) " HEADERS")
+      (princ resty-formated-headers))))
+
+(defun resty--formatted-headers (response duration)
+  (let ((request-headers (plist-get (request-response-settings response) :headers))
+        (time (float-time duration)))
+    (string-trim
+     (string-join
+      (mapcar (lambda (s) (format "%s" s))
+              (list (resty--format-request-headers request-headers)
+                    (format "\nRequest duration = %fs" time)
+                    (or (request-response-error-thrown response) "")
+                    (request-response--raw-header response)))
+      "\n"))))
 
 (defun resty--print-headers (response duration)
   (let ((hstart (point))

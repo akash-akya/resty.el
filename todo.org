@@ -81,9 +81,7 @@ callback is called after success/failure
 success : green
 failure : red
 
-** TODO show header as popup on a key-press
-another solution might be using org-mode
-org-mode makes poly-mode possible
+** DONE show header as popup on a key-press
 
 ** TODO fix pipelines loosing base URL
 currently consequent pipelines fail to get the baseurl when the buffer
