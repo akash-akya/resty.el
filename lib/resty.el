@@ -41,8 +41,11 @@
   (if (consp alist)
       (concat "?"
               (string-join
-               (mapcar (lambda (pair) (concat (car pair) "=" (cdr pair))) alist)
-        "&"))
+               (mapcar (lambda (pair)
+                         (concat (format "%s" (car pair))
+                                 "="
+                                 (format "%s" (cdr pair)))) alist)
+               "&"))
     ""))
 
 (defun resty--make-request (method path body &rest rest)
@@ -62,30 +65,63 @@
      (list #'resty--response-handler))))
 
 (defun resty--response-handler (data response request duration)
-  ;; handle different mime and headers
-  (resty--default-response-handler data response request duration))
+  (let ((status-code (request-response-status-code response))
+        (url (plist-get (request-response-settings response) :url))
+        ;; (time (float-time duration))
+        (method (plist-get (request-response-settings response) :type)))
+    (with-current-buffer (resty--create-buffer (plist-get request :id))
+      (erase-buffer)
+      (funcall (resty--get-response-handler (resty--response-content-type response))
+               data response request duration)
+      (resty--set-header-line status-code method url)
+      (switch-to-buffer-other-window (current-buffer))
+      (other-window -1))))
 
-(defun resty--default-response-handler (_data response request duration)
-  (with-current-buffer (resty--create-buffer (plist-get request :id))
-    (erase-buffer)
-    (js-mode)
-    (hs-minor-mode)
-    (when (json-response? response)
-      (insert (request-response-data response))
-      (json-pretty-print-buffer))
-    (when (csv-response? response)
-      (insert (request-response-data response)))
-    (goto-char (point-max))
-    (resty--print-headers response duration)
-    (goto-char (point-min))
-    (buffer-enable-undo)
-    (resty-response-mode)
-    (message "")
-    (switch-to-buffer-other-window (current-buffer))
-    (other-window -1)))
+(defun resty--set-header-line (status-code method url)
+  (setq-local header-line-format
+              (concat
+               " "
+               (propertize (format "%s" (or status-code "ERROR"))
+                           'face (list :inherit (if (or (null status-code)
+                                                        (> status-code 299))
+                                                    'error
+                                                  'success)
+                                       :weight 'bold))
+               " "
+               (propertize method 'face 'bold)
+               " "
+               (propertize url))))
+
+(defun resty--response-content-type (response)
+  (let ((content-type (request-response-header response "Content-Type")))
+    (message " --- content-type: %s" content-type)
+    (and content-type (car (split-string content-type ";")))))
 
 (defun resty--create-buffer (id)
   (get-buffer-create (format "*RESTY-%s*" id)))
+
+(defvar resty--response-handlers (make-hash-table))
+(defun resty--add-response-handler (content-type handler)
+  (puthash content-type handler resty--response-handler))
+
+(defun resty--get-response-handler (content-type)
+  (or (gethash content-type resty--response-handlers)
+      #'resty--default-response-handler))
+
+(defun resty--default-response-handler (_data response request duration)
+  (js-mode)
+  (hs-minor-mode)
+  (when (json-response? response)
+    (insert (request-response-data response))
+    (json-pretty-print-buffer))
+  (when (csv-response? response)
+    (insert (request-response-data response)))
+  (goto-char (point-max))
+  (resty--print-headers response duration)
+  (goto-char (point-min))
+  (buffer-enable-undo)
+  (resty-response-mode)
+  (message ""))
 
 (defun json-response? (response)
   (let ((content-type (request-response-header response "Content-Type")))

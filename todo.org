@@ -77,7 +77,13 @@ callback is called after success/failure
 
 ** DONE format request headers
 
+** DONE show status as header with coloring
+success : green
+failure : red
+
 ** TODO show header as popup on a key-press
+another solution might be using org-mode
+org-mode makes poly-mode possible
 
 ** TODO fix pipelines loosing base URL
 currently consequent pipelines fail to get the baseurl when the buffer
