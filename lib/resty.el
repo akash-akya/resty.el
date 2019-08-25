@@ -121,7 +121,7 @@
   (goto-char (point-min))
   (buffer-enable-undo)
   (resty-response-mode)
-  (message ""))
+  (message "[RESTY] DONE: %s" duration))
 
 (defun json-response? (response)
   (let ((content-type (request-response-header response "Content-Type")))
