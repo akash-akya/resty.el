@@ -52,20 +52,20 @@
     ""))
 
 (defun resty--make-request (method path body &rest rest)
-  (setq user-headers (or (plist-get rest :headers) '())
-        base-url (or (plist-get rest :base-url)
-                     (resty--base-url (plist-get rest :env)))
-        success-callbacks (or (plist-get rest :callbacks) '())
-        params (resty--url-params (or (plist-get rest :params) '()))
-        id (or (plist-get rest :id) resty-buffer-response-name)
-        timeout (or (plist-get rest :timeout) resty-default-timeout))
-  (let ((headers (append user-headers resty-default-headers))
-        (url (concat base-url path params)))
-    (resty--http-do
-     (list :id id :method method :url url :headers headers :entity (json-encode-plist body))
-     timeout
-     (cons #'resty--response-handler success-callbacks)
-     (list #'resty--response-handler))))
+  (let ((user-headers (or (plist-get rest :headers) '()))
+         (base-url (or (plist-get rest :base-url)
+                       (resty--base-url (plist-get rest :env))))
+         (success-callbacks (or (plist-get rest :callbacks) '()))
+         (params (resty--url-params (or (plist-get rest :params) '())))
+         (id (or (plist-get rest :id) resty-buffer-response-name))
+         (timeout (or (plist-get rest :timeout) resty-default-timeout)))
+    (let ((headers (append user-headers resty-default-headers))
+          (url (concat base-url path params)))
+      (resty--http-do
+       (list :id id :method method :url url :headers headers :entity (json-encode-plist body))
+       timeout
+       (cons #'resty--response-handler success-callbacks)
+       (list #'resty--response-handler)))))
 
 (defun resty--response-handler (data response request duration)
   (let ((status-code (request-response-status-code response))
@@ -74,8 +74,11 @@
         (method (plist-get (request-response-settings response) :type)))
     (with-current-buffer (resty--create-buffer (plist-get request :id))
       (erase-buffer)
-      (funcall (resty--get-response-handler (resty--response-content-type response))
+      (funcall (resty--response-buffer-callback response)
                data response request duration)
+      (buffer-enable-undo)
+      (resty-response-mode)
+      (message "[RESTY] DONE: %fs" (float-time duration))
       (setq-local resty-formated-headers (resty--formatted-headers response duration))
       (resty--set-header-line status-code method url)
       (switch-to-buffer-other-window (current-buffer))
@@ -103,11 +106,22 @@
 (defun resty--create-buffer (id)
   (get-buffer-create (format "*RESTY-%s*" id)))
 
+(defun resty--response-buffer-callback (response)
+  (let ((status (request-response-symbol-status response)))
+    (if (member status '(success error))
+        (resty--response-content-type-dispatcher
+         (resty--response-content-type response))
+      #'resty--response-display-error)))
+
+(defun resty--response-display-error (_data response _request _duration)
+  (text-mode)
+  (insert (format "Error: %s" (request-response-symbol-status response))))
+
 (defvar resty--response-handlers (make-hash-table))
 (defun resty--add-response-handler (content-type handler)
   (puthash content-type handler resty--response-handler))
 
-(defun resty--get-response-handler (content-type)
+(defun resty--response-content-type-dispatcher (content-type)
   (or (gethash content-type resty--response-handlers)
       #'resty--default-response-handler))
 
@@ -118,13 +132,7 @@
     (insert (request-response-data response))
     (json-pretty-print-buffer))
   (when (csv-response? response)
-    (insert (request-response-data response)))
-  (goto-char (point-max))
-  ;; (resty--print-headers response duration)
-  (goto-char (point-min))
-  (buffer-enable-undo)
-  (resty-response-mode)
-  (message "[RESTY] DONE: %fs" (float-time duration)))
+    (insert (request-response-data response))))
 
 (defun json-response? (response)
   (let ((content-type (request-response-header response "Content-Type")))
