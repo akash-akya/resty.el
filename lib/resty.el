@@ -61,6 +61,7 @@
          (timeout (or (plist-get rest :timeout) resty-default-timeout)))
     (let ((headers (append user-headers resty-default-headers))
           (url (concat base-url path params)))
+      (kill-buffer (resty--response-buffer-name id))
       (resty--http-do
        (list :id id :method method :url url :headers headers :entity (json-encode-plist body))
        timeout
@@ -72,7 +73,7 @@
         (url (plist-get (request-response-settings response) :url))
         ;; (time (float-time duration))
         (method (plist-get (request-response-settings response) :type)))
-    (with-current-buffer (resty--create-buffer (plist-get request :id))
+    (resty--safe-buffer (resty--response-buffer-name (plist-get request :id))
       (erase-buffer)
       (funcall (resty--response-buffer-callback response)
                data response request duration)
@@ -83,6 +84,18 @@
       (resty--set-header-line status-code method url)
       (switch-to-buffer-other-window (current-buffer))
       (other-window -1))))
+
+(defun resty--response-buffer-name (name)
+  (format "*RESTY-%s*" name))
+
+(defmacro resty--safe-buffer (name &rest body)
+  `(let ((buffer (generate-new-buffer ,name)) done)
+     (with-current-buffer buffer
+       (unwind-protect
+           (progn
+             ,@body
+             (setq done t))
+         (unless done (kill-buffer buffer))))))
 
 (defun resty--set-header-line (status-code method url)
   (setq-local header-line-format
