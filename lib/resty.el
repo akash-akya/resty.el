@@ -61,7 +61,7 @@
          (timeout (or (plist-get rest :timeout) resty-default-timeout)))
     (let ((headers (append user-headers resty-default-headers))
           (url (concat base-url path params)))
-      (kill-buffer (resty--response-buffer-name id))
+      (resty--reset-response-buffer id method url)
       (resty--http-do
        (list :id id :method method :url url :headers headers :entity (json-encode-plist body))
        timeout
@@ -83,33 +83,43 @@
       (setq-local resty-formated-headers (resty--formatted-headers response duration))
       (resty--set-header-line status-code method url)
       (switch-to-buffer-other-window (current-buffer))
+      (beginning-of-buffer)
       (other-window -1))))
 
 (defun resty--response-buffer-name (name)
   (format "*RESTY-%s*" name))
 
+(defun resty--reset-response-buffer (id method url)
+  (with-current-buffer (get-buffer-create (resty--response-buffer-name id))
+    (setq-local header-line-format
+                (concat
+                 (propertize (format " START %s " method) 'face 'bold)
+                 (propertize url)))
+    (erase-buffer)
+    (switch-to-buffer-other-window (current-buffer))
+    (other-window -1)))
+
 (defmacro resty--safe-buffer (name &rest body)
-  `(let ((buffer (generate-new-buffer ,name)) done)
-     (with-current-buffer buffer
-       (unwind-protect
-           (progn
-             ,@body
-             (setq done t))
-         (unless done (kill-buffer buffer))))))
+  (let ((buffer (make-symbol "buffer"))
+        (done (make-symbol "done")))
+    `(let ((,buffer (generate-new-buffer ,name)) ,done)
+       (with-current-buffer ,buffer
+         (unwind-protect
+             (progn
+               ,@body
+               (setq ,done t))
+           (unless ,done (kill-buffer ,buffer)))))))
 
 (defun resty--set-header-line (status-code method url)
   (setq-local header-line-format
               (concat
-               " "
-               (propertize (format "%s" (or status-code "ERROR"))
+               (propertize (format " %s " (or status-code "ERROR"))
                            'face (list :inherit (if (or (null status-code)
                                                         (> status-code 299))
                                                     'error
                                                   'success)
                                        :weight 'bold))
-               " "
-               (propertize method 'face 'bold)
-               " "
+               (propertize method 'face 'bold) " "
                (propertize url))))
 
 (defun resty--response-content-type (response)
@@ -148,12 +158,10 @@
     (insert (request-response-data response))))
 
 (defun json-response? (response)
-  (let ((content-type (request-response-header response "Content-Type")))
-    (string-prefix-p "application/json" content-type)))
+  (string-prefix-p "application/json" (request-response-header response "Content-Type")))
 
 (defun csv-response? (response)
-  (let ((content-type (request-response-header response "Content-Type")))
-    (string-prefix-p "text/csv" content-type)))
+  (string-prefix-p "text/csv" (request-response-header response "Content-Type")))
 
 (defun resty--show-headers-window ()
   (let ((help-window-select t))
@@ -172,28 +180,9 @@
                     (request-response--raw-header response)))
       "\n"))))
 
-(defun resty--print-headers (response duration)
-  (let ((hstart (point))
-        (url (plist-get (request-response-settings response) :url))
-        (method (plist-get (request-response-settings response) :type))
-        (request-headers (plist-get (request-response-settings response) :headers))
-        (time (float-time duration)))
-    (insert
-     (string-join
-      (mapcar (lambda (s) (format "%s" s))
-              (list "\n"
-                    (concat method " " url)
-                    (resty--format-request-headers request-headers)
-                    (format "\nRequest duration = %fs" time)
-                    (or (request-response-error-thrown response) "")
-                    (request-response--raw-header response)))
-      "\n"))
-    (comment-region hstart (point))))
-
 (defun resty--format-request-headers (headers)
   (string-join
-   (mapcar (lambda (elem) (format "%s: %s" (car elem) (cdr elem)))
-           headers)
+   (mapcar (lambda (elem) (format "%s: %s" (car elem) (cdr elem))) headers)
    "\n"))
 
 (defun POST (path body &rest rest)
@@ -213,26 +202,22 @@
 
 ;; config
 
-(defvar resty--env-config '())
+(defvar resty--environments (make-hash-table))
+(defvar resty--current-environment :dev)
 
-(defvar resty--current-env 'dev)
+(defun resty-set-environments (plist)
+  (map-put resty--environments (buffer-name)
+           (if (consp plist) plist `(:default plist))))
 
-(defun resty--add-env (env-pair)
-  (unless (consp env-pair) (setq env-pair `((global . ,env-pair))))
-  (setq resty--env-config
-        (cons (cons (buffer-name) env-pair)
-              resty--env-config)))
-
-(defun resty--get-env (name env)
-  (alist-get env (alist-get name resty--env-config)))
+(defun resty--get-environment (name env)
+  (plist-get (map-elt resty--environments name) env))
 
 ;; (defun resty--use-env (env) (setq-local use-env env))
-
 (defun resty--base-url (env)
   (if env
-      (resty--get-env (buffer-name) env)
-    (or (resty--get-env (buffer-name) resty--current-env)
-        (resty--get-env (buffer-name) 'global))))
+      (resty--get-environment (buffer-name) env)
+    (or (resty--get-environment (buffer-name) resty--current-environment)
+        (resty--get-environment (buffer-name) :default))))
 
 ;; Enable hideshow minor mode
 (hs-minor-mode)
