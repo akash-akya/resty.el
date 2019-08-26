@@ -1,7 +1,7 @@
 ;; -*- lexical-binding: t -*-
 (require 'request)
 
-(defvar resty--request-state-hash (make-hash-table))
+(defvar resty--request-state-hash (make-hash-table :test 'equal))
 (defun resty--request-lock (id)
   (unless (gethash id resty--request-state-hash)
     (puthash id 'lock resty--request-state-hash)
