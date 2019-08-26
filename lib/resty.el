@@ -102,7 +102,7 @@
 (defmacro resty--safe-buffer (name &rest body)
   (let ((buffer (make-symbol "buffer"))
         (done (make-symbol "done")))
-    `(let ((,buffer (generate-new-buffer ,name)) ,done)
+    `(let ((,buffer (get-buffer-create ,name)) ,done)
        (with-current-buffer ,buffer
          (unwind-protect
              (progn
@@ -125,9 +125,6 @@
 (defun resty--response-content-type (response)
   (let ((content-type (request-response-header response "Content-Type")))
     (and content-type (car (split-string content-type ";")))))
-
-(defun resty--create-buffer (id)
-  (get-buffer-create (format "*RESTY-%s*" id)))
 
 (defun resty--response-buffer-callback (response)
   (let ((status (request-response-symbol-status response)))
