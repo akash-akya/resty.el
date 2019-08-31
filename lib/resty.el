@@ -52,21 +52,24 @@
     ""))
 
 (defun resty--make-request (method path body &rest rest)
-  (let ((user-headers (or (plist-get rest :headers) '()))
+  (let* ((env (or (plist-get rest :env) resty--current-environment))
+         (resty--buffer-name (or resty--buffer-name (buffer-name)))
          (base-url (or (plist-get rest :base-url)
-                       (resty--base-url (plist-get rest :env))))
-         (success-callbacks (or (plist-get rest :callbacks) '()))
+                       (resty--base-url resty--environments resty--buffer-name env)))
          (params (resty--url-params (or (plist-get rest :params) '())))
+         (url (concat base-url path params))
+         (user-headers (or (plist-get rest :headers) '()))
+         (headers (append user-headers resty-default-headers))
+         (success-callbacks (or (plist-get rest :callbacks) '()))
          (id (or (plist-get rest :id) resty-buffer-response-name))
          (timeout (or (plist-get rest :timeout) resty-default-timeout)))
-    (let ((headers (append user-headers resty-default-headers))
-          (url (concat base-url path params)))
-      (resty--reset-response-buffer id method url)
-      (resty--http-do
-       (list :id id :method method :url url :headers headers :entity (json-encode-plist body))
-       timeout
-       (cons #'resty--response-handler success-callbacks)
-       (list #'resty--response-handler)))))
+    (resty--reset-response-buffer id method url)
+    (resty--http-do
+     (list :id id :method method :url url :headers headers :entity (json-encode-plist body))
+     timeout
+     (cons #'resty--response-handler success-callbacks)
+     (list #'resty--response-handler)
+     (list resty--environments resty--current-environment resty--buffer-name))))
 
 (defun resty--response-handler (data response request duration)
   (let ((status-code (request-response-status-code response))
@@ -199,22 +202,20 @@
 
 ;; config
 
+;; buffer name captured when request starts, needed for request
+;; chaining to preserve the context during consecutive requests
+(setq resty--buffer-name nil)
 (defvar resty--environments (make-hash-table))
 (defvar resty--current-environment :dev)
 
 (defun resty-set-environments (plist)
   (map-put resty--environments (buffer-name)
-           (if (consp plist) plist `(:default plist))))
+           (if (consp plist) plist (list :default plist))))
 
-(defun resty--get-environment (name env)
-  (plist-get (map-elt resty--environments name) env))
-
-;; (defun resty--use-env (env) (setq-local use-env env))
-(defun resty--base-url (env)
-  (if env
-      (resty--get-environment (buffer-name) env)
-    (or (resty--get-environment (buffer-name) resty--current-environment)
-        (resty--get-environment (buffer-name) :default))))
+(defun resty--base-url (environments name env)
+  (let ((buffer-env (map-elt environments name)))
+    (or (plist-get buffer-env env)
+        (plist-get buffer-env :default))))
 
 ;; Enable hideshow minor mode
 (hs-minor-mode)

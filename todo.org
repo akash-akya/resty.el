@@ -83,7 +83,7 @@ failure : red
 
 ** DONE show header as popup on a key-press
 
-** TODO fix pipelines loosing base URL
+** DONE fix pipelines loosing base URL
 currently consequent pipelines fail to get the baseurl when the buffer
 switch happens before that request starts
 
