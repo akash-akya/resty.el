@@ -203,8 +203,11 @@
 ;; config
 
 ;; buffer name captured when request starts, needed for request
-;; chaining to preserve the context during consecutive requests
-(setq resty--buffer-name nil)
+;; chaining to preserve the context during consecutive requests.
+;; *should* not be set manually, it will be set and used internally
+(make-variable-buffer-local
+ (defvar resty--buffer-name nil "Number of foos inserted into the current buffer."))
+
 (defvar resty--environments (make-hash-table))
 (defvar resty--current-environment :dev)
 
@@ -217,8 +220,15 @@
     (or (plist-get buffer-env env)
         (plist-get buffer-env :default))))
 
-;; Enable hideshow minor mode
-(hs-minor-mode)
+;;; mode definition
+
+;;;###autoload
+(define-derived-mode resty-mode
+  emacs-lisp-mode "Resty"
+  "Major mode for Resty")
+
+;;;###autoload
+(add-to-list 'auto-mode-alist '("\\.resty\\'" . resty-mode))
 
 (provide 'resty)
 ;;; resty.el ends here

@@ -87,15 +87,16 @@ failure : red
 currently consequent pipelines fail to get the baseurl when the buffer
 switch happens before that request starts
 
+** DONE create resty as a mode
+we can create a derived mod from emacs-lisp
+
+** TODO should be able to load environment from file automatically
 ** TODO import cURL request
 
 ** TODO allow pipe-lining requests
 similar ~|>~ operator in Elixir
 
 ** TODO show environment in modeline
-
-** TODO create resty as a mode
-we can create a derived mod from emacs-lisp
 
 ** TODO editing json should be painless
 *** TODO can paste json text from outside Emacs and create a request
