@@ -55,7 +55,8 @@
   (let* ((env (or (plist-get rest :env) resty--current-environment))
          (resty--buffer-name (or resty--buffer-name (buffer-name)))
          (base-url (or (plist-get rest :base-url)
-                       (resty--base-url resty--environments resty--buffer-name env)))
+                       (resty--base-url resty--environments resty--buffer-name env)
+                       (error "No base URL" env resty--buffer-name)))
          (params (resty--url-params (or (plist-get rest :params) '())))
          (url (concat base-url path params))
          (user-headers (or (plist-get rest :headers) '()))
@@ -206,6 +207,56 @@
 (defun DELETE (path body &rest rest)
   (apply #'resty--make-request (append (list "DELETE" path body) rest)))
 
+;; cURL utils
+
+(defun resty--top-level-sexp ()
+  (interactive)
+  (save-excursion
+    (let ((beg (progn (beginning-of-defun) (point)))
+          (end (progn (end-of-defun) (point))))
+      (buffer-substring-no-properties beg end))))
+
+(defun resty--copy-as-curl-command ()
+  (interactive)
+  (let ((sexp (read (resty--top-level-sexp))))
+    (message "%s" sexp)
+    (when (and (consp sexp) (memq (car sexp) '(POST GET DELETE PATCH PUT)))
+      (resty--copy-as-curl sexp))))
+
+(defun resty--copy-as-curl (request-sexp)
+  ;; FIXME: unify parsing at request handing and convertion to curl
+  (let* ((method (format "%s" (car request-sexp)))
+         (path (nth 1 request-sexp))
+         (body (if (not (string-equal method "GET"))
+                   (json-encode-plist (cadr (nth 2 request-sexp)))
+                 ""))
+         (rest (nth (if (> (length body) 0) 3 2) request-sexp)))
+    (let* ((env (or (plist-get rest :env) resty--current-environment))
+           (resty--buffer-name (or resty--buffer-name (buffer-name)))
+           (base-url (or (plist-get rest :base-url)
+                         (resty--base-url resty--environments resty--buffer-name env)
+                         (error "No base URL" env resty--buffer-name)))
+           (params (resty--url-params (or (plist-get rest :params) '())))
+           (url (concat base-url path params))
+           (user-headers (or (plist-get rest :headers) '()))
+           (headers (append user-headers resty-default-headers)))
+      (let ((header-args
+             (apply 'append
+                    (mapcar (lambda (header)
+                              (list "-H" (format "'%s: %s'" (car header) (cdr header))))
+                            headers))))
+        (kill-new (concat "curl "
+                          (string-join
+                           (list "-i"
+                                 (concat "-X " method)
+                                 (format "'%s'" url)
+                                 (string-join header-args " ")
+                                 (when (> (length body) 0)
+                                   (format "-d '%s'" body)))
+                           " ")
+                          " ")))
+      (message "curl command copied to clipboard."))))
+
 ;; config
 
 ;; buffer name captured when request starts, needed for request
@@ -231,7 +282,10 @@
 ;;;###autoload
 (define-derived-mode resty-mode
   emacs-lisp-mode "Resty"
-  "Major mode for Resty")
+  "Major mode for Resty"
+
+  (setq-local mode-name
+              '(:eval (propertize (format "Resty[%s]" resty--current-environment) 'face 'bold))))
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.resty\\'" . resty-mode))
