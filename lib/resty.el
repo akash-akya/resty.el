@@ -85,9 +85,15 @@
       (message "[RESTY] DONE: %fs" (float-time duration))
       (setq-local resty-formated-headers (resty--formatted-headers response duration))
       (resty--set-header-line status-code method url)
-      (switch-to-buffer-other-window (current-buffer))
-      (beginning-of-buffer)
-      (other-window -1))))
+      (resty--display-buffer (current-buffer)))))
+
+(defun resty--display-buffer (buffer)
+  (let ((window (display-buffer buffer nil)))
+    (let* ((old-frame (selected-frame))
+           (new-frame (window-frame window)))
+      (select-window window)
+      (unless (eq old-frame new-frame)
+        (select-frame-set-input-focus new-frame)))))
 
 (defun resty--response-buffer-name (name)
   (format "*RESTY-%s*" name))
