@@ -305,6 +305,12 @@
 
 (add-hook 'resty-mode-hook #'resty--eval-buffer-init)
 
+;; Environment setting helper
+(defun resty--set-global-environment ()
+  (interactive)
+  (setq resty--current-environment
+        (intern (completing-read "RESTY: set environment:" '(:dev :stage)))))
+
 ;;; mode definition
 
 ;;;###autoload
