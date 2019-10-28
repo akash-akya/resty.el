@@ -1,0 +1,45 @@
+#+TITLE: WIP: RESTY
+
+ Programmable emacs interface to interact with RESTful endpoints
+
+*** Rational
+- Familiarity of the Editor interface
+
+- Programmable requests
+
+  If we expose API interaction as a composable primitives (DSL), we can generate the request dynamically with ease. We don't have to fight with the rest client application to program payload
+  The request is just a elisp function call, so we can access all  elisp code/lib. like writing API tests etc.
+
+- Having superior editor and plugins at your disposal open new doors
+
+  Example:
+  - Converting json to plist/alist and use structural editing (Paredit)
+  - It is also possible to parse swagger to have auto-completion/validation
+
+
+- Request-response chaining and sharing
+
+  We can think series of requests as a tree with requests as nodes with dependency between them. If the requests are composable, we can build these flows just by reusing componates
+
+  Example: sign-in --> make_requests --> sign-out
+
+- Better integration
+
+  Having same environment for source code and rest-client helps to have seamless integration and workflow as the response is just another buffer
+
+  Example:
+  - For Elixir projects, I can convert Elixir Map to json or vice-versa easily
+  - We can use ~jq~ plugin to query filter response json
+
+
+- Requests or collections are just files
+
+  Since the interface to make a request itself is just a elisp function call and keeping related requests in a file is a natural way to organize requests.
+  We can use traditional VCS to track changes
+
+
+**** Note
+This is a personal work-in-progress project. The features are based on my current usecase. Goal is to have a small but extendable core so everyone can change it easily as they see fit
+
+*** How to use?
+ TODO
