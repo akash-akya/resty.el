@@ -277,6 +277,34 @@
     (or (plist-get buffer-env env)
         (plist-get buffer-env :default))))
 
+;; auto buffer initialization
+(defun resty--buffer-init-name ()
+  (intern (format "resty--init-%s" (buffer-name))))
+
+(defmacro resty--init (&rest body)
+  `(setq-local ,(resty--buffer-init-name) (lambda () ,@body)))
+
+(defun resty--buffer-sexps ()
+  (save-excursion
+    (let (forms)
+      (beginning-of-buffer)
+      (while (not (eobp))
+        (if-let ((str (ignore-errors (read (current-buffer)))))
+            (push str forms)))
+      forms)))
+
+(defun resty--define-buffer-local-init ()
+  (when-let
+      ((form (seq-find (lambda (f) (eq (car f) 'resty--init)) (resty--buffer-sexps))))
+    (message " From: %s" form)
+    (message " Eval From: %s" (eval form))))
+
+(defun resty--eval-buffer-init ()
+  (resty--define-buffer-local-init)
+  (message "  Eval Result: %s" (funcall (symbol-value (resty--buffer-init-name)))))
+
+(add-hook 'resty-mode-hook #'resty--eval-buffer-init)
+
 ;;; mode definition
 
 ;;;###autoload
