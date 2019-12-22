@@ -152,23 +152,32 @@
   (puthash content-type handler resty--response-handler))
 
 (defun resty--response-content-type-dispatcher (content-type)
-  (or (gethash content-type resty--response-handlers)
-      #'resty--default-response-handler))
+  (pcase content-type
+    ("application/json" #'resty--json-response-handler)
+    ("application/xml" #'resty--xml-response-handler)
+    ("text/xml" #'resty--xml-response-handler)
+    ((pred (string-prefix-p "text/")) #'resty--text-response-handler)
+    (_ #'resty--skip-response-handler)))
 
-(defun resty--default-response-handler (_data response request duration)
+(defun resty--json-response-handler (_data response request duration)
   (js-mode)
   (hs-minor-mode)
-  (when (json-response? response)
-    (insert (request-response-data response))
-    (json-pretty-print-buffer))
-  (when (csv-response? response)
-    (insert (request-response-data response))))
+  (insert (request-response-data response))
+  (json-pretty-print-buffer))
 
-(defun json-response? (response)
-  (string-prefix-p "application/json" (request-response-header response "Content-Type")))
+(defun resty--xml-response-handler (_data response request duration)
+  (nxml-mode)
+  (hs-minor-mode)
+  (insert (request-response-data response)))
 
-(defun csv-response? (response)
-  (string-prefix-p "text/csv" (request-response-header response "Content-Type")))
+(defun resty--text-response-handler (_data response request duration)
+  (text-mode)
+  (insert (request-response-data response)))
+
+(defun resty--skip-response-handler (_data response request duration)
+  (text-mode)
+  (insert "Not showing response for the request"))
+
 
 (defun resty--show-headers-window ()
   (let ((help-window-select t))
