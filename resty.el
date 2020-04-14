@@ -22,7 +22,6 @@
   :type 'string)
 
 (defcustom resty-default-headers '(("Content-Type" . "application/json")
-                                   ("Accept" . "application/json")
                                    ("cache-control" . "no-cache"))
   "Default headers"
   :group 'resty
@@ -36,6 +35,9 @@
                      (interactive)
                      (quit-window (get-buffer-window (current-buffer)))))
             ("h" . (lambda ()
+                     (interactive)
+                     (resty--show-headers-window)))
+            ("$" . (lambda ()
                      (interactive)
                      (resty--show-headers-window))))
   :group 'resty)
@@ -250,21 +252,43 @@
            (user-headers (or (plist-get rest :headers) '()))
            (headers (append user-headers resty-default-headers)))
       (let ((header-args
-             (apply 'append
-                    (mapcar (lambda (header)
-                              (list "-H" (format "'%s: %s'" (car header) (cdr header))))
-                            headers))))
-        (kill-new (concat "curl "
-                          (string-join
-                           (list "-i"
-                                 (concat "-X " method)
-                                 (format "'%s'" url)
-                                 (string-join header-args " ")
-                                 (when (> (length body) 0)
-                                   (format "-d '%s'" body)))
-                           " ")
-                          " ")))
+             (mapcar (lambda (header)
+                        (format "-H '%s: %s'" (car header) (cdr header)))
+                     headers))
+            (joiner " \\\n  "))
+        (kill-new (string-join
+                   (list (format "curl -X %s" method)
+                         (format "'%s'" url)
+                         (string-join header-args joiner)
+                         (when (> (length body) 0)
+                           (if (equal (assoc-string "Content-Type" headers)
+                                      '("Content-Type" . "application/json"))
+                               (format "-d '%s'" (resty--indent (resty--format-json body) "  "))
+                             (format "-d '%s'" body))))
+                  joiner)))
       (message "curl command copied to clipboard."))))
+
+(defun resty--indent (json indent)
+  (replace-regexp-in-string "\n" (concat "\n" indent) json))
+
+(defun resty--run-command (text out-buffer)
+  (with-temp-buffer
+    (insert text)
+    (call-process-region (point-min) (point-max) "jq" nil out-buffer t "." "--raw-output")))
+
+(defun resty--indent-json (text)
+  (let (return-value)
+    (with-temp-buffer
+      (setq return-value (resty--run-command text (current-buffer)))
+      (list return-value (buffer-string)))))
+
+(defun resty--format-json (body)
+  (if (executable-find "jq")
+      (let* ((result (resty--indent-json body))
+             (status (car result))
+             (text (cadr result)))
+        (if (eq status 0) (string-trim text) body))
+    body))
 
 ;; config
 
