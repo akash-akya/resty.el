@@ -1,6 +1,7 @@
 ;; -*- lexical-binding: t -*-
 (require 'request)
 (load "./request-helper")
+(load "./resty-utils")
 
 (defgroup resty nil
   "An interactive HTTP client for Emacs."
