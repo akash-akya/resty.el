@@ -54,7 +54,29 @@
                "&"))
     ""))
 
-(defun resty--make-request (method path body &rest rest)
+(defun resty--make-request (request)
+  (let* ((success-callbacks (or (plist-get request :callbacks) '()))
+         (timeout (or (plist-get request :timeout) resty-default-timeout))
+         (id (plist-get request :id))
+         (method (plist-get request :method))
+         (url (plist-get request :url))
+         (body (plist-get request :body))
+         (headers (plist-get request :headers)))
+    (resty--reset-response-buffer id method url)
+    (resty--http-do
+     (list :id id :method method :url url :headers headers :entity body)
+     timeout
+     (cons #'resty--response-handler success-callbacks)
+     (list #'resty--response-handler)
+     (list resty--environments resty--current-environment resty--buffer-name))))
+
+(defun resty--run-request ()
+  (interactive)
+  (let ((sexp (read (resty--top-level-sexp))))
+    (message "%s" sexp)
+    (resty--make-request (eval sexp))))
+
+(defun resty--build-request (method path body &rest rest)
   (let* ((env (or (plist-get rest :env) resty--current-environment))
          (resty--buffer-name (or resty--buffer-name (buffer-name)))
          (base-url (or (plist-get rest :base-url)
@@ -64,16 +86,9 @@
          (url (concat base-url path params))
          (user-headers (or (plist-get rest :headers) '()))
          (headers (append user-headers resty-default-headers))
-         (success-callbacks (or (plist-get rest :callbacks) '()))
-         (id (or (plist-get rest :id) resty-buffer-response-name))
-         (timeout (or (plist-get rest :timeout) resty-default-timeout)))
-    (resty--reset-response-buffer id method url)
-    (resty--http-do
-     (list :id id :method method :url url :headers headers :entity (json-encode-plist body))
-     timeout
-     (cons #'resty--response-handler success-callbacks)
-     (list #'resty--response-handler)
-     (list resty--environments resty--current-environment resty--buffer-name))))
+         (id (or (plist-get rest :id) resty-buffer-response-name)))
+    (append rest (list :id id :method method :url url :headers headers :body (json-encode-plist body)))))
+
 
 (defun resty--response-handler (data response request duration)
   (let ((status-code (request-response-status-code response))
@@ -204,20 +219,23 @@
    (mapcar (lambda (elem) (format "%s: %s" (car elem) (cdr elem))) headers)
    "\n"))
 
+(defun cond-eval (method path body rest)
+  (apply #'resty--build-request method path body rest))
+
 (defun POST (path body &rest rest)
-  (apply #'resty--make-request (append (list "POST" path body) rest)))
+  (cond-eval "POST" path body rest))
 
 (defun GET (path &rest rest)
-  (apply #'resty--make-request (append (list "GET" path nil) rest)))
+  (cond-eval "GET" path nil rest))
 
 (defun PATCH (path body &rest rest)
-  (apply #'resty--make-request (append (list "PATCH" path body) rest)))
+  (cond-eval "PATCH" path body rest))
 
 (defun PUT (path body &rest rest)
-  (apply #'resty--make-request (append (list "PUT" path body) rest)))
+  (cond-eval "PUT" path body rest))
 
 (defun DELETE (path body &rest rest)
-  (apply #'resty--make-request (append (list "DELETE" path body) rest)))
+  (cond-eval "DELETE" path body rest))
 
 ;; cURL utils
 
@@ -231,43 +249,28 @@
 (defun resty--copy-as-curl-command ()
   (interactive)
   (let ((sexp (read (resty--top-level-sexp))))
-    (message "%s" sexp)
-    (when (and (consp sexp) (memq (car sexp) '(POST GET DELETE PATCH PUT)))
-      (resty--copy-as-curl sexp))))
+    (resty--copy-as-curl (eval sexp))))
 
-(defun resty--copy-as-curl (request-sexp)
-  ;; FIXME: unify parsing at request handing and convertion to curl
-  (let* ((method (format "%s" (car request-sexp)))
-         (path (nth 1 request-sexp))
-         (body (if (not (string-equal method "GET"))
-                   (json-encode-plist (cadr (nth 2 request-sexp)))
-                 ""))
-         (rest (nth (if (> (length body) 0) 3 2) request-sexp)))
-    (let* ((env (or (plist-get rest :env) resty--current-environment))
-           (resty--buffer-name (or resty--buffer-name (buffer-name)))
-           (base-url (or (plist-get rest :base-url)
-                         (resty--base-url resty--environments resty--buffer-name env)
-                         (error "No base URL" env resty--buffer-name)))
-           (params (resty--url-params (or (plist-get rest :params) '())))
-           (url (concat base-url path params))
-           (user-headers (or (plist-get rest :headers) '()))
-           (headers (append user-headers resty-default-headers)))
-      (let ((header-args
-             (mapcar (lambda (header)
-                        (format "-H '%s: %s'" (car header) (cdr header)))
-                     headers))
-            (joiner " \\\n  "))
-        (kill-new (string-join
-                   (list (format "curl -X %s" method)
-                         (format "'%s'" url)
-                         (string-join header-args joiner)
-                         (when (> (length body) 0)
-                           (if (equal (assoc-string "Content-Type" headers)
-                                      '("Content-Type" . "application/json"))
-                               (format "-d '%s'" (resty--indent (resty--format-json body) "  "))
-                             (format "-d '%s'" body))))
-                  joiner)))
-      (message "curl command copied to clipboard."))))
+(defun resty--copy-as-curl (request)
+  (let ((url (plist-get request :url))
+        (body (plist-get request :body))
+        (method (plist-get request :method))
+        (headers (plist-get request :headers)))
+    (let ((header-args
+           (mapcar (lambda (header) (format "-H '%s: %s'" (car header) (cdr header)))
+                   headers))
+          (joiner " \\\n  "))
+      (kill-new (string-join
+                 (list (format "curl -X %s" method)
+                       (format "'%s'" url)
+                       (string-join header-args joiner)
+                       (when (> (length body) 0)
+                         (if (equal (assoc-string "Content-Type" headers)
+                                    '("Content-Type" . "application/json"))
+                             (format "-d '%s'" (resty--indent (resty--format-json body) "  "))
+                           (format "-d '%s'" body))))
+                 joiner)))
+    (message "curl command copied to clipboard.")))
 
 (defun resty--indent (json indent)
   (replace-regexp-in-string "\n" (concat "\n" indent) json))
