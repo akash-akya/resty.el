@@ -43,14 +43,17 @@
                      (resty--show-headers-window))))
   :group 'resty)
 
+(defun resty--stringify (obj)
+  (prin1-to-string obj t))
+
 (defun resty--url-params (alist)
   (if (consp alist)
       (concat "?"
               (string-join
                (mapcar (lambda (pair)
-                         (concat (format "%s" (car pair))
+                         (concat (url-hexify-string (resty--stringify (car pair)))
                                  "="
-                                 (format "%s" (cdr pair)))) alist)
+                                 (url-hexify-string (resty--stringify (cdr pair))))) alist)
                "&"))
     ""))
 
@@ -341,6 +344,8 @@
   (message "  Eval Result: %s" (funcall (symbol-value (resty--buffer-init-name)))))
 
 (add-hook 'resty-mode-hook #'resty--eval-buffer-init)
+
+;; (global-set-key (kbd "C-c c") #'resty--run-request)
 
 ;; Environment setting helper
 (defun resty--set-global-environment ()
