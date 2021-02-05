@@ -11,14 +11,27 @@
 (defun resty--request-unlock (id)
   (remhash id resty--request-state-hash))
 
+(defun resty--log-request (request)
+  (message "=============== HTTP-REQUEST-START ID:%s =============" (plist-get request :id))
+  (message "%s %s" (plist-get request :method) (plist-get request :url))
+  (message "HEADERS:")
+  (let ((body (plist-get request :entity))
+        (headers (plist-get request :headers)))
+    (mapcar (lambda (header)
+              (message "  %s: %s" (car header) (cdr header)))
+            (plist-get request :headers))
+
+    (when (> (length body) 0)
+      (message "BODY:")
+      (if (equal (assoc-string "Content-Type" headers)
+                 '("Content-Type" . "application/json"))
+          (message (resty--format-json body))
+        (message body))))
+  (message "=============== HTTP-REQUEST-END ID:%s ==============" (plist-get request :id)))
+
 (defun resty--http-do (request timeout success-callbacks failure-callbacks context)
   "`Context' is need for supporting request chaining. since the request.el makes asynchronous call, the lexical bindings will be lost"
-  (message "HTTP %s %s ID: %s Headers: %s Body: %s"
-           (plist-get request :method)
-           (plist-get request :url)
-           (plist-get request :id)
-           (plist-get request :headers)
-           (plist-get request :entity))
+  (resty--log-request request)
   (if (null (resty--request-lock (plist-get request :id)))
       (message "[resty] A request is already in process... skipping")
     (let (status)

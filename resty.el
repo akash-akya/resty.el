@@ -76,7 +76,7 @@
 (defun resty--run-request ()
   (interactive)
   (let ((sexp (read (resty--top-level-sexp))))
-    (message "%s" sexp)
+    ;; (message "%s" sexp)
     (resty--make-request (eval sexp))))
 
 (defun resty--build-request (method path body &rest rest)
@@ -98,6 +98,7 @@
         (url (plist-get (request-response-settings response) :url))
         ;; (time (float-time duration))
         (method (plist-get (request-response-settings response) :type)))
+    (resty--log-response request response)
     (resty--safe-buffer (resty--response-buffer-name (plist-get request :id))
       (erase-buffer)
       (funcall (resty--response-buffer-callback response)
@@ -119,6 +120,16 @@
 
 (defun resty--response-buffer-name (name)
   (format "*RESTY-%s*" name))
+
+(defun resty--log-response (request response)
+  (message "=============== HTTP-RESPONSE-START ID:%s =============" (plist-get request :id))
+  (pcase (resty--response-content-type response)
+    ("application/json" (message (resty--format-json (request-response-data response))))
+    ("application/xml" (message (request-response-data response)))
+    ("text/xml" (message (request-response-data response)))
+    ((pred (string-prefix-p "text/")) (message (request-response-data response)))
+    (_ (message "None Text Response")))
+  (message "=============== HTTP-RESPONSE-END ID:%s ==============" (plist-get request :id)))
 
 (defun resty--reset-response-buffer (id method url)
   (with-current-buffer (get-buffer-create (resty--response-buffer-name id))
@@ -345,7 +356,7 @@
 
 (add-hook 'resty-mode-hook #'resty--eval-buffer-init)
 
-;; (global-set-key (kbd "C-c c") #'resty--run-request)
+(global-set-key (kbd "C-c c") #'resty--run-request)
 
 ;; Environment setting helper
 (defun resty--set-global-environment ()
