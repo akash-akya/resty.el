@@ -38,6 +38,12 @@
             ("h" . (lambda ()
                      (interactive)
                      (resty--show-headers-window)))
+            ("p" . (lambda ()
+                     (interactive)
+                     (resty--goto-request-pos)))
+            ("g" . (lambda ()
+                     (interactive)
+                     (resty--re-run)))
             ("$" . (lambda ()
                      (interactive)
                      (resty--show-headers-window))))
@@ -57,7 +63,7 @@
                "&"))
     ""))
 
-(defun resty--make-request (request)
+(defun resty--make-request (request pos)
   (let* ((success-callbacks (or (plist-get request :callbacks) '()))
          (timeout (or (plist-get request :timeout) resty-default-timeout))
          (id (plist-get request :id))
@@ -67,7 +73,7 @@
          (headers (plist-get request :headers)))
     (resty--reset-response-buffer id method url)
     (resty--http-do
-     (list :id id :method method :url url :headers headers :entity body)
+     (list :id id :method method :url url :headers headers :entity body :pos pos)
      timeout
      (cons #'resty--response-handler success-callbacks)
      (list #'resty--response-handler)
@@ -76,8 +82,7 @@
 (defun resty--run-request ()
   (interactive)
   (let ((sexp (read (resty--top-level-sexp))))
-    ;; (message "%s" sexp)
-    (resty--make-request (eval sexp))))
+    (resty--make-request (eval sexp) (point-marker))))
 
 (defun resty--build-request (method path body &rest rest)
   (let* ((env (or (plist-get rest :env) resty--current-environment))
@@ -89,9 +94,9 @@
          (url (concat base-url path params))
          (user-headers (or (plist-get rest :headers) '()))
          (headers (append user-headers resty-default-headers))
-         (id (or (plist-get rest :id) resty-buffer-response-name)))
-    (append rest (list :id id :method method :url url :headers headers :body (json-encode-plist body)))))
-
+         (id (or (plist-get rest :id) resty-buffer-response-name))
+         (pos (point-marker)))
+    (append rest (list :id id :method method :url url :headers headers :body (json-encode-plist body) :pos pos))))
 
 (defun resty--response-handler (data response request duration)
   (let ((status-code (request-response-status-code response))
@@ -107,6 +112,7 @@
       (resty-response-mode)
       (message "[RESTY] DONE: %fs" (float-time duration))
       (setq-local resty-formated-headers (resty--formatted-headers response duration))
+      (setq-local resty-request request)
       (resty--set-header-line status-code method url)
       (resty--display-buffer (current-buffer)))))
 
@@ -132,14 +138,16 @@
   (message "=============== HTTP-RESPONSE-END ID:%s ==============" (plist-get request :id)))
 
 (defun resty--reset-response-buffer (id method url)
-  (with-current-buffer (get-buffer-create (resty--response-buffer-name id))
-    (setq-local header-line-format
-                (concat
-                 (propertize (format " START %s " method) 'face 'bold)
-                 (propertize url)))
-    (erase-buffer)
-    (switch-to-buffer-other-window (current-buffer))
-    (other-window -1)))
+  (let ((request-buffer (current-buffer)))
+    (with-current-buffer (get-buffer-create (resty--response-buffer-name id))
+      (setq-local header-line-format
+                  (concat
+                   (propertize (format " START %s " method) 'face 'bold)
+                   (propertize url)))
+      (erase-buffer)
+      (unless (eq request-buffer (current-buffer))
+        (switch-to-buffer-other-window (current-buffer))
+        (other-window -1)))))
 
 (defmacro resty--safe-buffer (name &rest body)
   (let ((buffer (make-symbol "buffer"))
@@ -215,6 +223,17 @@
   (let ((help-window-select t))
     (with-help-window (concat (buffer-name) " HEADERS")
       (princ resty-formated-headers))))
+
+(defun resty--goto-request-pos ()
+  (let ((pos (plist-get resty-request :pos)))
+    (when (markerp pos)
+      (with-current-buffer (marker-buffer pos)
+        (goto-char pos)
+        (switch-to-buffer-other-window (marker-buffer pos))))))
+
+(defun resty--re-run ()
+  (let ((pos (plist-get resty-request :pos)))
+    (resty--make-request resty-request pos)))
 
 (defun resty--formatted-headers (response duration)
   (let ((request-headers (plist-get (request-response-settings response) :headers))
