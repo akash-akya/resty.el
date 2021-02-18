@@ -6,6 +6,8 @@
 (defun resty--request-lock (id)
   (unless (gethash id resty--request-state-hash)
     (puthash id 'lock resty--request-state-hash)
+    ;; if buffer is killed for some reason before we get chance to cleanup
+    (add-hook 'kill-buffer-hook (lambda () (resty--request-unlock id)) 0 :local)
     t))
 
 (defun resty--request-unlock (id)

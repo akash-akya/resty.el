@@ -140,6 +140,8 @@
 (defun resty--reset-response-buffer (id method url)
   (let ((request-buffer (current-buffer)))
     (with-current-buffer (get-buffer-create (resty--response-buffer-name id))
+      (when buffer-read-only
+        (setq-local buffer-read-only nil))
       (setq-local header-line-format
                   (concat
                    (propertize (format " START %s " method) 'face 'bold)
@@ -203,7 +205,8 @@
   (js-mode)
   (hs-minor-mode)
   (insert (request-response-data response))
-  (json-pretty-print-buffer))
+  (json-pretty-print-buffer)
+  (setq-local buffer-read-only t))
 
 (defun resty--xml-response-handler (_data response request duration)
   (nxml-mode)
@@ -339,7 +342,7 @@
 (defvar resty--current-environment :dev)
 
 (defun resty-set-environments (plist)
-  (map-put resty--environments (buffer-name)
+  (map-put! resty--environments (buffer-name)
            (if (consp plist) plist (list :default plist))))
 
 (defun resty--base-url (environments name env)
