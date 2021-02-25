@@ -2,6 +2,8 @@
 (require 'cl-lib)
 (require 'request)
 (require 'json)
+(require 'pp)
+(require 'curl-to-elisp)
 
 (defvar resty-mode-hook nil)
 
@@ -384,6 +386,34 @@
 
 ;; cURL utils
 
+(defun resty--extract-curl (cmd)
+  "Returns '(URL METHOD HEADERS DATA SILENT)"
+  (curl-to-elisp--extract
+   (curl-to-elisp--parse
+    (curl-to-elisp--tokenize
+     (curl-to-elisp--trim cmd)))))
+
+(defun resty--get-header (key headers)
+  (alist-get "content-type" headers nil nil #'string-equal))
+
+(defun resty-import-request-from-curl (curl-string &optional insert)
+  (interactive (list (read-string "cURL command: ") t))
+  (cl-multiple-value-bind (url method headers data silent) (resty--extract-curl curl-string)
+    (seq-do (lambda (el) (setf (car el) (downcase (car el)))) headers)
+    (setq method (or method "GET"))
+    (setq content-type (resty--get-header "content-type" headers))
+    (if (and content-type (not (string= content-type "application/json")))
+        (error "Only support application/json")
+      (let ((json-object-type 'plist))
+        (setq data (json-read-from-string (or data "{}")))))
+    (setq exp-str (list (intern (upcase method)) url
+                        (and data (list 'quote data))
+                        :headers (and headers (list 'quote headers))))
+    (when insert
+      (save-excursion
+        (insert (pp-to-string exp-str))))
+    (pp-to-string exp-str)))
+
 (defun resty--top-level-sexp ()
   (interactive)
   (save-excursion
@@ -391,12 +421,12 @@
           (end (progn (end-of-defun) (point))))
       (buffer-substring-no-properties beg end))))
 
-(defun resty--copy-as-curl-command ()
+(defun resty-copy-current-request-as-curl ()
   (interactive)
   (let ((sexp (read (resty--top-level-sexp))))
-    (resty--copy-as-curl (eval sexp))))
+    (resty--copy-request-as-curl (eval sexp))))
 
-(defun resty--copy-as-curl (request)
+(defun resty--copy-request-as-curl (request)
   (let ((url (plist-get request :url))
         (body (plist-get request :body))
         (method (plist-get request :method))
