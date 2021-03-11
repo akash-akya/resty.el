@@ -16,17 +16,35 @@
 
 (defun resty-json-to-alist (begin end)
   (interactive "r")
-  (resty--encode-json begin end 'alist))
+  (resty-encode-json begin end 'alist))
 
 (defun resty-json-to-plist (begin end)
   (interactive "r")
-  (resty--encode-json begin end 'plist))
+  (resty-encode-json begin end 'plist))
 
 (defun resty-encode-json (begin end object-type)
   (atomic-change-group
     (let ((json-object-type object-type)
           (txt (delete-and-extract-region begin end)))
       (insert (prin1-to-string (json-read-from-string txt))))))
+
+(defun resty-pget (plist keys &optional default-value)
+  (unless default-value (setq default-value nil))
+  (let ((key (pop keys)))
+    (cond
+     ((null key)
+      plist)
+     ((listp plist)
+      (if (plist-member plist key)
+          (resty-pget (plist-get plist key) keys default-value)
+        default-value))
+     (t
+      (error "Invalid args" plist keys)))))
+
+(defun resty-jget (json keys)
+  (let* ((json-object-type 'plist)
+         (body (json-read-from-string json)))
+    (resty-pget body keys)))
 
 ;; request handler
 
@@ -41,6 +59,11 @@
 
 (defun resty--request-unlock (id)
   (remhash id resty--request-state-hash))
+
+;; ***DEBUG***
+;; (defun resty-unlock-request ()
+;;   (interactive)
+;;   (resty--request-unlock "Response"))
 
 (defun resty--log-request (request)
   (message "=============== HTTP-REQUEST-START ID:%s =============" (plist-get request :id))
@@ -64,7 +87,7 @@
   "`Context' is need for supporting request chaining. since the request.el makes asynchronous call, the lexical bindings will be lost"
   (resty--log-request request)
   (if (null (resty--request-lock (plist-get request :id)))
-      (message "[resty] A request is already in process... skipping")
+      (message "[resty.el] A request is already in process... skipping")
     (let (status)
       (unwind-protect
           (progn
@@ -84,23 +107,21 @@
                              (append (list #'resty--unlock-request) failure-callbacks)
                              context))
             (setq status 'ok)
-            (message "[resty] Request started"))
+            (message "[resty.el] Request started"))
         (unless status
           (resty--request-unlock (plist-get request :id))
-          (message "[resty] Request failed due to an error"))))))
+          (message "[resty.el] Request failed due to an error"))))))
 
 (defun resty--create-response-handler (request callbacks context)
   (let ((start-time (current-time)))
     (lambda (&rest rest)
-      (let ((duration (time-subtract (current-time) start-time))
-            (data (resty--try-parsing-response (plist-get rest :response))))
+      (let* ((duration (time-subtract (current-time) start-time))
+             (response (plist-get rest :response))
+             (data (resty--try-parsing-response response))
+             (args (list data response request duration)))
         ;; Setting global dynamic variable temporarily
         ;; This works since Emacs is single threaded
-        (cl-letf (((symbol-value 'resty--environments) (seq-elt context 0))
-                  ((symbol-value 'resty--current-environment) (seq-elt context 1))
-                  ((symbol-value 'resty--buffer-name) (seq-elt context 2)))
-          (dolist (c callbacks)
-            (funcall c data (plist-get rest :response) request duration)))))))
+        (resty--call-with-dynamic-binding callbacks args context)))))
 
 (defun resty--try-parsing-response (response)
   (let ((data (request-response-data response))
@@ -111,6 +132,20 @@
 
 (defun resty--unlock-request (_data _response request _duration)
   (resty--request-unlock (plist-get request :id)))
+
+(defun resty--call-with-dynamic-binding (callbacks args bindings)
+  (let ((binding (pop bindings)))
+    (if (null binding)
+        (dolist (func callbacks)
+          (apply func args))
+      (let ((var-symbol (car binding))
+            (var-value (cdr binding)))
+        ;; make temp variable definition so `cl-letf' does not complain.
+        ;; we define new global-variable if there isn't one
+        (unless (boundp var-symbol)
+          (set var-symbol nil))
+        (cl-letf (((symbol-value var-symbol) var-value))
+          (resty--call-with-dynamic-binding callbacks args bindings))))))
 
 ;; configuration
 
@@ -181,14 +216,28 @@
          (method (plist-get request :method))
          (url (plist-get request :url))
          (body (plist-get request :body))
-         (headers (plist-get request :headers)))
-    (resty--reset-response-buffer id method url)
+         (display (resty-pget request '(:display) t))
+         (headers (plist-get request :headers))
+         (extra-context (resty-pget request '(:context) '()))
+         (context `((resty--environments        .  ,resty--environments)
+                    (resty--current-environment .  ,resty--current-environment)
+                    (resty--buffer-name         .  ,resty--buffer-name))))
+
+    (when display
+      (resty--reset-response-buffer id method url)
+      (push #'resty--response-handler success-callbacks))
+
+    ;; log response before anything else
+    (push #'resty--response-logger success-callbacks)
+
+    (setq context (append context extra-context))
+
     (resty--http-do
      (list :id id :method method :url url :headers headers :entity body :pos pos)
      timeout
-     (cons #'resty--response-handler success-callbacks)
+     success-callbacks
      (list #'resty--response-handler)
-     (list resty--environments resty--current-environment resty--buffer-name))))
+     context)))
 
 (defun resty--run-request ()
   (interactive)
@@ -205,23 +254,21 @@
          (url (concat base-url path params))
          (user-headers (or (plist-get rest :headers) '()))
          (headers (append user-headers resty-default-headers))
-         (id (or (plist-get rest :id) resty-buffer-response-name))
-         (pos (point-marker)))
-    (append rest (list :id id :method method :url url :headers headers :body (json-encode-plist body) :pos pos))))
+         (id (or (plist-get rest :id) resty-buffer-response-name)))
+    (append rest (list :id id :method method :url url :headers headers :body (json-encode-plist body)))))
 
 (defun resty--response-handler (data response request duration)
   (let ((status-code (request-response-status-code response))
         (url (plist-get (request-response-settings response) :url))
         ;; (time (float-time duration))
         (method (plist-get (request-response-settings response) :type)))
-    (resty--log-response request response)
     (resty--safe-buffer (resty--response-buffer-name (plist-get request :id))
       (erase-buffer)
       (funcall (resty--response-buffer-callback response)
                data response request duration)
       (buffer-enable-undo)
       (resty-response-mode)
-      (message "[RESTY] DONE: %fs" (float-time duration))
+      (message "[resty.el] took %fs" (float-time duration))
       (setq-local resty-formated-headers (resty--formatted-headers response duration))
       (setq-local resty-request request)
       (resty--set-header-line status-code method url)
@@ -234,6 +281,9 @@
       (select-window window)
       (unless (eq old-frame new-frame)
         (select-frame-set-input-focus new-frame)))))
+
+(defun resty--response-logger (data response request duration)
+  (resty--log-response request response))
 
 (defun resty--response-buffer-name (name)
   (format "*RESTY-%s*" name))
@@ -475,7 +525,7 @@
 ;; chaining to preserve the context during consecutive requests.
 ;; *should* not be set manually, it will be set and used internally
 (make-variable-buffer-local
- (defvar resty--buffer-name nil "Number of foos inserted into the current buffer."))
+ (defvar resty--buffer-name nil))
 
 (defvar resty--environments (make-hash-table))
 (defvar resty--current-environment :dev)
