@@ -46,19 +46,38 @@
          (body (json-read-from-string json)))
     (resty-pget body keys)))
 
+;; LOGGING
+
+(defun resty--log (&rest args)
+  (with-current-buffer (resty--log-buffer)
+    (goto-char (point-max))
+    (let ((inhibit-read-only t))
+      (insert (apply 'format args))
+      (insert "\n"))))
+
+(defvar resty--log-buffer nil)
+
+(defun resty--log-buffer ()
+  (if (buffer-live-p resty--log-buffer)
+      resty--log-buffer
+    (with-current-buffer (get-buffer-create resty-log-buffer-name)
+      (buffer-disable-undo)
+      (setq buffer-read-only t)
+      (setf resty--log-buffer (current-buffer)))))
+
 ;; request handler
 
 (defvar resty--request-state-hash (make-hash-table :test 'equal))
 
-(defun resty--request-lock (id)
-  (unless (gethash id resty--request-state-hash)
-    (puthash id 'lock resty--request-state-hash)
-    ;; if buffer is killed for some reason before we get chance to cleanup
-    (add-hook 'kill-buffer-hook (lambda () (resty--request-unlock id)) 0 :local)
-    t))
+;; (defun resty--request-lock (id)
+;;   (unless (gethash id resty--request-state-hash)
+;;     (puthash id 'lock resty--request-state-hash)
+;;     ;; if buffer is killed for some reason before we get chance to cleanup
+;;     (add-hook 'kill-buffer-hook (lambda () (resty--request-unlock id)) 0 :local)
+;;     t))
 
-(defun resty--request-unlock (id)
-  (remhash id resty--request-state-hash))
+;; (defun resty--request-unlock (id)
+;;   (remhash id resty--request-state-hash))
 
 ;; ***DEBUG***
 ;; (defun resty-unlock-request ()
@@ -66,51 +85,49 @@
 ;;   (resty--request-unlock "Response"))
 
 (defun resty--log-request (request)
-  (message "=============== HTTP-REQUEST-START ID:%s =============" (plist-get request :id))
-  (message "%s %s" (plist-get request :method) (plist-get request :url))
-  (message "HEADERS:")
+  (resty--log "--->" (plist-get request :id))
+  (resty--log "%s %s" (plist-get request :method) (plist-get request :url))
+  (resty--log "HEADERS:")
   (let ((body (plist-get request :entity))
         (headers (plist-get request :headers)))
     (mapcar (lambda (header)
-              (message "  %s: %s" (car header) (cdr header)))
+              (resty--log "  %s: %s" (car header) (cdr header)))
             (plist-get request :headers))
 
     (when (> (length body) 0)
-      (message "BODY:")
+      (resty--log "BODY:")
       (if (equal (assoc-string "Content-Type" headers)
                  '("Content-Type" . "application/json"))
-          (message (resty--format-json body))
-        (message body))))
-  (message "=============== HTTP-REQUEST-END ID:%s ==============" (plist-get request :id)))
+          (resty--log (resty--format-json body))
+        (resty--log body))))
+  (resty--log ""))
 
 (defun resty--http-do (request timeout success-callbacks failure-callbacks context)
   "`Context' is need for supporting request chaining. since the request.el makes asynchronous call, the lexical bindings will be lost"
   (resty--log-request request)
-  (if (null (resty--request-lock (plist-get request :id)))
-      (message "[resty.el] A request is already in process... skipping")
-    (let (status)
-      (unwind-protect
-          (progn
-            (request (plist-get request :url)
-                     :headers (plist-get request :headers)
-                     :type (plist-get request :method)
-                     :data (plist-get request :entity)
-                     :parser 'buffer-string
-                     ;; :sync t
-                     :timeout timeout
-                     :success (resty--create-response-handler
-                               request
-                               (append (list #'resty--unlock-request) success-callbacks)
-                               context)
-                     :error (resty--create-response-handler
-                             request
-                             (append (list #'resty--unlock-request) failure-callbacks)
-                             context))
-            (setq status 'ok)
-            (message "[resty.el] Request started"))
-        (unless status
-          (resty--request-unlock (plist-get request :id))
-          (message "[resty.el] Request failed due to an error"))))))
+  (let (status)
+    (unwind-protect
+        (progn
+          (request (plist-get request :url)
+            :headers (plist-get request :headers)
+            :type (plist-get request :method)
+            :data (plist-get request :entity)
+            :parser 'buffer-string
+            ;; :sync t
+            :timeout timeout
+            :success (resty--create-response-handler
+                      request
+                      success-callbacks
+                      context)
+            :error (resty--create-response-handler
+                    request
+                    failure-callbacks
+                    context))
+          (setq status 'ok)
+          (message "[resty.el] Request started"))
+      (unless status
+        ;; (resty--request-unlock (plist-get request :id))
+        (message "[resty.el] Request failed due to an error")))))
 
 (defun resty--create-response-handler (request callbacks context)
   (let ((start-time (current-time)))
@@ -124,14 +141,23 @@
         (resty--call-with-dynamic-binding callbacks args context)))))
 
 (defun resty--try-parsing-response (response)
-  (let ((data (request-response-data response))
+  (let (valid-json?
+        (data (request-response-data response))
         (content-type (request-response-header response "Content-Type")))
-    (if (string-prefix-p "application/json" content-type)
+    (if (and (string-prefix-p "application/json" content-type)
+             (resty--valid-json? data))
         (json-read-from-string data)
       data)))
 
-(defun resty--unlock-request (_data _response request _duration)
-  (resty--request-unlock (plist-get request :id)))
+(defun resty--valid-json? (data)
+  (condition-case nil
+      (progn
+        (json-read-from-string data)
+        t)
+    (error nil)))
+
+;; (defun resty--unlock-request (_data _response request _duration)
+;;   (resty--request-unlock (plist-get request :id)))
 
 (defun resty--call-with-dynamic-binding (callbacks args bindings)
   (let ((binding (pop bindings)))
@@ -154,9 +180,14 @@
   :group 'tools)
 
 (defcustom resty-log-request t
-  "Log resty requests to *Messages*."
+  "Log resty request response"
   :group 'resty
   :type 'boolean)
+
+(defcustom resty-log-buffer-name "*Resty Logs*"
+  "Buffer name for resty request response logs"
+  :group 'resty
+  :type 'string)
 
 (defcustom resty-default-timeout 7
   "Default timeout for requests in seconds"
@@ -289,14 +320,14 @@
   (format "*RESTY-%s*" name))
 
 (defun resty--log-response (request response)
-  (message "=============== HTTP-RESPONSE-START ID:%s =============" (plist-get request :id))
+  (resty--log "<---")
   (pcase (resty--response-content-type response)
-    ("application/json" (message "%s" (resty--format-json (request-response-data response))))
-    ("application/xml" (message "%s" (request-response-data response)))
-    ("text/xml" (message "%s" (request-response-data response)))
-    ((pred (string-prefix-p "text/")) (message "%s" (request-response-data response)))
-    (_ (message "None Text Response")))
-  (message "=============== HTTP-RESPONSE-END ID:%s ==============" (plist-get request :id)))
+    ("application/json" (resty--log "%s" (resty--format-json (request-response-data response))))
+    ("application/xml" (resty--log "%s" (request-response-data response)))
+    ("text/xml" (resty--log "%s" (request-response-data response)))
+    ((pred (string-prefix-p "text/")) (resty--log "%s" (request-response-data response)))
+    (_ (resty--log "None Text Response")))
+  (resty--log ""))
 
 (defun resty--reset-response-buffer (id method url)
   (let ((request-buffer (current-buffer)))
@@ -363,10 +394,15 @@
     (_ #'resty--skip-response-handler)))
 
 (defun resty--json-response-handler (_data response request duration)
-  (js-mode)
-  (hs-minor-mode)
   (insert (request-response-data response))
-  (json-pretty-print-buffer)
+
+  (if (resty--valid-json? (request-response-data response))
+      (progn
+        (js-mode)
+        (hs-minor-mode)
+        (json-pretty-print-buffer))
+    (text-mode))
+
   (setq-local buffer-read-only t))
 
 (defun resty--xml-response-handler (_data response request duration)
@@ -385,7 +421,7 @@
 
 (defun resty--show-headers-window ()
   (let ((help-window-select t))
-    (with-help-window (concat (buffer-name) " HEADERS")
+    (with-help-window (format " *Resty Header*")
       (princ resty-formated-headers))))
 
 (defun resty--goto-request-pos ()
@@ -396,7 +432,9 @@
         (switch-to-buffer-other-window (marker-buffer pos))))))
 
 (defun resty--re-run ()
-  (let ((pos (plist-get resty-request :pos)))
+  (let* ((pos (plist-get resty-request :pos))
+         (request (plist-put resty-request :body (plist-get resty-request :entity)))
+         (request (map--plist-delete request :entity)))
     (resty--make-request resty-request pos)))
 
 (defun resty--formatted-headers (response duration)
