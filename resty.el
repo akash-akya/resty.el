@@ -10,7 +10,7 @@
 (defvar resty-mode-map
   (let ((map (make-sparse-keymap)))
     map)
-  "Keymap used in `elixir-mode'.")
+  "Keymap used in `resty-mode'.")
 
 ;; helper utils
 
@@ -286,7 +286,7 @@
          (user-headers (or (plist-get rest :headers) '()))
          (headers (append user-headers resty-default-headers))
          (id (or (plist-get rest :id) resty-buffer-response-name)))
-    (append rest (list :id id :method method :url url :headers headers :body (json-encode-plist body)))))
+    (append rest (list :id id :method method :url url :headers headers :body (and body (json-encode-plist body))))))
 
 (defun resty--response-handler (data response request duration)
   (let ((status-code (request-response-status-code response))
@@ -418,7 +418,6 @@
   (text-mode)
   (insert "Not showing response for the request"))
 
-
 (defun resty--show-headers-window ()
   (let ((help-window-select t))
     (with-help-window (format " *Resty Header*")
@@ -515,25 +514,30 @@
     (resty--copy-request-as-curl (eval sexp))))
 
 (defun resty--copy-request-as-curl (request)
-  (let ((url (plist-get request :url))
-        (body (plist-get request :body))
-        (method (plist-get request :method))
-        (headers (plist-get request :headers)))
-    (let ((header-args
-           (mapcar (lambda (header) (format "-H '%s: %s'" (car header) (cdr header)))
-                   headers))
-          (joiner " \\\n  "))
-      (kill-new (string-join
-                 (list (format "curl -X %s" method)
-                       (format "'%s'" url)
-                       (string-join header-args joiner)
-                       (when (> (length body) 0)
-                         (if (equal (assoc-string "Content-Type" headers)
-                                    '("Content-Type" . "application/json"))
-                             (format "-d '%s'" (resty--indent (resty--format-json body) "  "))
-                           (format "-d '%s'" body))))
-                 joiner)))
+  (pcase-let* ((url (plist-get request :url))
+               (body (plist-get request :body))
+               (method (plist-get request :method))
+               (headers (plist-get request :headers))
+               (newline-joiner " \\\n  ")
+               (headers-list
+                (mapcar (lambda (h) (format "-H '%s: %s'" (car h) (cdr h))) headers))
+               (headers-str (string-join headers-list newline-joiner))
+               (body (resty--build-curl-body headers body))
+               (parts (list (format "curl -X %s" method) (format "'%s'" url) headers-str body))
+               (filtered-parts (seq-remove #'null parts))
+               (cmd-str (string-join filtered-parts newline-joiner)))
+    (kill-new cmd-str)
     (message "curl command copied to clipboard.")))
+
+(defun rest--content-type-json-p (headers)
+  (equal (assoc-string "Content-Type" headers)
+         '("Content-Type" . "application/json")))
+
+(defun resty--build-curl-body (headers body)
+  (when (> (length body) 0)
+    (if (resty--content-type-json-p headers)
+        (format "-d '%s'" (resty--indent (resty--format-json body) "  "))
+      (format "-d '%s'" body))))
 
 (defun resty--indent (json indent)
   (replace-regexp-in-string "\n" (concat "\n" indent) json))
