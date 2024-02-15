@@ -604,7 +604,7 @@
   (message "  Eval Result: %s" (funcall (symbol-value (resty--buffer-init-name)))))
 
 
-;; (global-set-key (kbd "C-c c") #'resty--run-request)
+(global-set-key (kbd "C-c c") #'resty--run-request)
 
 ;; Environment setting helper
 (defun resty--set-global-environment ()
