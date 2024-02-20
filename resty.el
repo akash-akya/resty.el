@@ -259,7 +259,7 @@
       (push #'resty--response-handler success-callbacks))
 
     ;; log response before anything else
-    (push #'resty--response-logger success-callbacks)
+    ;; (push #'resty--response-logger success-callbacks)
 
     (setq context (append context extra-context))
 
