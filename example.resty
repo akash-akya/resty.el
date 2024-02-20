@@ -1,0 +1,9 @@
+;; -*- lexical-binding: t; -*-
+
+(resty--init
+ (resty-set-environments
+  '(:dev "https://www.githubstatus.com")))
+
+
+
+(GET "/api/v2/summary.json")
