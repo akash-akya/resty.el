@@ -124,10 +124,10 @@
                     failure-callbacks
                     context))
           (setq status 'ok)
-          (message "[resty.el] Request started"))
+          (message "[resty.el] request started"))
       (unless status
         ;; (resty--request-unlock (plist-get request :id))
-        (message "[resty.el] Request failed due to an error")))))
+        (message "[resty.el] request failed due to an error")))))
 
 (defun resty--create-response-handler (request callbacks context)
   (let ((start-time (current-time)))
@@ -299,7 +299,7 @@
                data response request duration)
       (buffer-enable-undo)
       (resty-response-mode)
-      (message "[resty.el] took %fs" (float-time duration))
+      (message "[resty.el] took %.3fs" (float-time duration))
       (setq-local resty-formated-headers (resty--formatted-headers response duration))
       (setq-local resty-request request)
       (resty--set-header-line status-code method url)
@@ -443,7 +443,7 @@
      (string-join
       (mapcar (lambda (s) (format "%s" s))
               (list (resty--format-request-headers request-headers)
-                    (format "\nRequest duration = %fs" time)
+                    (format "\nRequest took %.3fs" time)
                     (or (request-response-error-thrown response) "")
                     (request-response--raw-header response)))
       "\n"))))
